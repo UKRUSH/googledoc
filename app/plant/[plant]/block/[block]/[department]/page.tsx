@@ -2,8 +2,7 @@ import { Metadata } from "next";
 import Link from "next/link";
 import Breadcrumb from "@/components/Breadcrumb";
 import BackButton from "@/components/BackButton";
-import GoogleSheetButton from "@/components/GoogleSheetButton";
-import CopyLinkButton from "@/components/CopyLinkButton";
+import SheetLinkManager from "@/components/SheetLinkManager";
 import ErrorState from "@/components/ErrorState";
 import Stepper from "@/components/Stepper";
 import { getPlant } from "@/data/plants";
@@ -132,11 +131,11 @@ export default async function DepartmentPage({
             </div>
           </dl>
 
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <div className="flex-1">
-              <GoogleSheetButton sheetUrl={sheetUrl} />
-            </div>
-            {sheetUrl && <CopyLinkButton url={sheetUrl} />}
+          <div className="mt-6">
+            <SheetLinkManager
+              storageKey={`sheet:${plantSlug}:${block}:${department}`}
+              initialUrl={sheetUrl}
+            />
           </div>
         </div>
       </div>
