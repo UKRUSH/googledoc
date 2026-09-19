@@ -1,69 +1,37 @@
 "use client";
 
-import { useState, useSyncExternalStore, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import GoogleSheetButton from "@/components/GoogleSheetButton";
 import CopyLinkButton from "@/components/CopyLinkButton";
 
-// Client-side gate only — this is NOT real security. The password lives in the
-// bundle and localStorage is per-browser, so this just stops casual editing,
-// not a determined visitor. Wire up a real backend before relying on this.
-const ADMIN_PASSWORD = "Changeme@123";
-const UPDATE_EVENT = "sheet-link-updated";
-
-function readStoredUrl(storageKey: string): string | null {
-  try {
-    return window.localStorage.getItem(storageKey);
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredUrl(storageKey: string, value: string) {
-  try {
-    if (value) {
-      window.localStorage.setItem(storageKey, value);
-    } else {
-      window.localStorage.removeItem(storageKey);
-    }
-  } catch {
-    // localStorage unavailable (private browsing, etc.)
-  }
-  window.dispatchEvent(new Event(UPDATE_EVENT));
-}
-
-function subscribe(callback: () => void) {
-  window.addEventListener("storage", callback);
-  window.addEventListener(UPDATE_EVENT, callback);
-  return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener(UPDATE_EVENT, callback);
-  };
-}
-
 export default function SheetLinkManager({
-  storageKey,
+  plantSlug,
+  block,
+  department,
   initialUrl,
 }: {
-  storageKey: string;
+  plantSlug: string;
+  block: string;
+  department: string;
   initialUrl: string;
 }) {
-  const storedUrl = useSyncExternalStore(
-    subscribe,
-    () => readStoredUrl(storageKey),
-    () => null
-  );
-  const url = storedUrl ?? initialUrl;
+  const router = useRouter();
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [draftUrl, setDraftUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   function openPanel() {
-    setDraftUrl(url);
+    setDraftUrl(initialUrl);
     setPassword("");
     setPasswordError(false);
+    setSaveError("");
     setUnlocked(false);
     setPanelOpen(true);
   }
@@ -72,34 +40,74 @@ export default function SheetLinkManager({
     setPanelOpen(false);
   }
 
-  function handlePasswordSubmit(e: FormEvent) {
+  async function handlePasswordSubmit(e: FormEvent) {
     e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
-      setUnlocked(true);
-      setPasswordError(false);
-    } else {
+    setVerifying(true);
+    setPasswordError(false);
+    try {
+      const res = await fetch("/api/sheet-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "verify", password }),
+      });
+      if (res.ok) {
+        setUnlocked(true);
+      } else {
+        setPasswordError(true);
+      }
+    } catch {
       setPasswordError(true);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function persist(url: string) {
+    setSaving(true);
+    setSaveError("");
+    try {
+      const res = await fetch("/api/sheet-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          plant: plantSlug,
+          block,
+          department,
+          url,
+          password,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSaveError(data.error ?? "Could not save. Please try again.");
+        return;
+      }
+      setPanelOpen(false);
+      router.refresh();
+    } catch {
+      setSaveError("Could not reach the server. Check your connection.");
+    } finally {
+      setSaving(false);
     }
   }
 
   function handleSave(e: FormEvent) {
     e.preventDefault();
-    writeStoredUrl(storageKey, draftUrl.trim());
-    setPanelOpen(false);
+    persist(draftUrl.trim());
   }
 
   function handleRemove() {
-    writeStoredUrl(storageKey, "");
-    setPanelOpen(false);
+    persist("");
   }
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="flex-1">
-          <GoogleSheetButton sheetUrl={url} />
+          <GoogleSheetButton sheetUrl={initialUrl} />
         </div>
-        {url && <CopyLinkButton url={url} />}
+        {initialUrl && <CopyLinkButton url={initialUrl} />}
       </div>
 
       {!panelOpen ? (
@@ -117,7 +125,7 @@ export default function SheetLinkManager({
               strokeLinejoin="round"
             />
           </svg>
-          {url ? "Change Sheet Link" : "Add Sheet Link"}
+          {initialUrl ? "Change Sheet Link" : "Add Sheet Link"}
         </button>
       ) : (
         <div className="animate-fade-in-up rounded-xl border border-border bg-background p-4">
@@ -142,9 +150,10 @@ export default function SheetLinkManager({
               <div className="mt-1 flex gap-2">
                 <button
                   type="submit"
-                  className="h-9 flex-1 rounded-lg bg-primary text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+                  disabled={verifying}
+                  className="h-9 flex-1 rounded-lg bg-primary text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-60"
                 >
-                  Unlock
+                  {verifying ? "Checking…" : "Unlock"}
                 </button>
                 <button
                   type="button"
@@ -169,18 +178,21 @@ export default function SheetLinkManager({
                 placeholder="https://docs.google.com/spreadsheets/..."
                 autoFocus
               />
+              {saveError && <p className="text-xs text-error">{saveError}</p>}
               <div className="mt-1 flex gap-2">
                 <button
                   type="submit"
-                  className="h-9 flex-1 rounded-lg bg-primary text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+                  disabled={saving}
+                  className="h-9 flex-1 rounded-lg bg-primary text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-60"
                 >
-                  Save
+                  {saving ? "Saving…" : "Save"}
                 </button>
-                {url && (
+                {initialUrl && (
                   <button
                     type="button"
                     onClick={handleRemove}
-                    className="h-9 rounded-lg border border-border px-3 text-sm text-muted transition-colors hover:border-error hover:text-error"
+                    disabled={saving}
+                    className="h-9 rounded-lg border border-border px-3 text-sm text-muted transition-colors hover:border-error hover:text-error disabled:opacity-60"
                   >
                     Remove
                   </button>
@@ -188,7 +200,8 @@ export default function SheetLinkManager({
                 <button
                   type="button"
                   onClick={closePanel}
-                  className="h-9 rounded-lg border border-border px-3 text-sm text-muted transition-colors hover:text-text"
+                  disabled={saving}
+                  className="h-9 rounded-lg border border-border px-3 text-sm text-muted transition-colors hover:text-text disabled:opacity-60"
                 >
                   Cancel
                 </button>

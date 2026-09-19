@@ -6,6 +6,7 @@ import SheetLinkManager from "@/components/SheetLinkManager";
 import ErrorState from "@/components/ErrorState";
 import Stepper from "@/components/Stepper";
 import { getPlant } from "@/data/plants";
+import { getResolvedSheetUrl } from "@/lib/sheetLinks";
 import {
   BLOCKS,
   DEPARTMENTS,
@@ -75,7 +76,7 @@ export default async function DepartmentPage({
     );
   }
 
-  const sheetUrl = plant.blocks[block][department];
+  const sheetUrl = getResolvedSheetUrl(plantSlug, block, department);
   const accent = department === "qa" ? "bg-qa" : "bg-agronomy";
   const accentSoft = department === "qa" ? "bg-qa-soft text-qa" : "bg-agronomy-soft text-agronomy";
   const otherDepartment: Department = department === "qa" ? "agronomy" : "qa";
@@ -133,7 +134,9 @@ export default async function DepartmentPage({
 
           <div className="mt-6">
             <SheetLinkManager
-              storageKey={`sheet:${plantSlug}:${block}:${department}`}
+              plantSlug={plantSlug}
+              block={block}
+              department={department}
               initialUrl={sheetUrl}
             />
           </div>
